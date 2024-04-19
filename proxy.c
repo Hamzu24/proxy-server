@@ -118,7 +118,7 @@ int main(int argc, char **argv) {
     }
 
     char request[MAXLINE];
-    while (rio_readlineb(&client_rio, buf_parser, MAXLINE) <= 0) {
+    while (rio_readlineb(&client_rio, buf_parser, MAXLINE) > 2) {
         parse_state = parser_parse_line(parser, buf_parser);
         if (parse_state != HEADER) {
             /* Error with reading request*/
@@ -126,40 +126,43 @@ int main(int argc, char **argv) {
         }
     }
 
-    size_t request_len = snprintf(request, MAXLINE, "GET %s HTTP/1.0\r\n", path);
+    snprintf(request, MAXLINE, "GET %s HTTP/1.0\r\n", path);
 
-    header_t *curHeader;
+    header_t *curHeader = parser_retrieve_next_header(parser);
     size_t headers_parsed;
-    while ((curHeader = parser_retrieve_next_header(parser)) != NULL) {
+    while (curHeader != NULL) {
         char *header_name = curHeader->name;
-
-        if (!strncmp("User-Agent", header_name, 10)) {
-            char *header_line[MAXLINE];
+        if (strncmp("User-agent", header_name, 10)) {
+            char header_line[MAXLINE] = "";
             strncat(header_line, header_name, MAXLINE);
             strncat(header_line, ": ", MAXLINE);
             strncat(header_line, curHeader->value, MAXLINE);
             strncat(header_line, "\r\n", MAXLINE);
 
-            request_len += 4 + strnlen(curHeader->value, MAXLINE) + strnlen(header_name, MAXLINE);
             strncat(request, header_line, MAXLINE);
         }
+        curHeader = parser_retrieve_next_header(parser);
         headers_parsed++;
+    }
+
+    if (headers_parsed < 1) {
+        /* Error, not enough headers */
     }
 
     strncat(request, "User-Agent: ", MAXLINE);
     strncat(request, header_user_agent, MAXLINE);
     strncat(request, "\r\n", MAXLINE);
     strncat(request, "\r\n", MAXLINE);
-    request_len += 2 + strlen(header_user_agent) + 12 + 2;
 
     int clientfd = open_clientfd(host, port); //Used to communicate with the server
 
-    rio_writen(clientfd, request, request_len);
+    rio_writen(clientfd, request, strlen(request));
 
     rio_t server_rio;
     rio_readinitb(&server_rio, clientfd);
     char server_response[MAXLINE];
-    size_t response_size = rio_readnb(&server_rio, server_response, MAXLINE);
-
-    rio_writen(client.connfd, server_response, response_size);
+    size_t response_size;
+    while ((response_size = rio_readnb(&server_rio, server_response, MAXLINE)) > 0) {
+        rio_writen(client.connfd, server_response, response_size);
+    }
 }
