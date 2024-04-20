@@ -1,6 +1,11 @@
 /*
- * Starter code for proxy lab.
- * Feel free to modify this code in whatever way you wish.
+ * This program implements a proxy server that can handle GET requests and headers of all type.
+ * It serves clients concurrently uses no control flow, using the serve function.
+ *
+ * To set up a connection with the client and the server, the wrapper functions open_clientfd and open_listenfd
+ * are used
+ *
+ * The only signal we block in this program is SIGPIPE. This is to prevent unexpected crashes and maintain stability.
  */
 
 /* Some useful includes to help you get started */
@@ -62,44 +67,72 @@ typedef struct {
     char port[MAXLINE];         // Client port
 } client_info;
 
-int main(int argc, char **argv) {
-    dbg_assert(argc == 2);
-    char *listening_port = argv[1];
-    int listenfd;
-    client_info client;
+void clienterror(int fd, const char *errnum, const char *shortmsg, const char *longmsg) {
+    char buf[MAXLINE];
+    char body[MAXBUF];
+    size_t buflen;
+    size_t bodylen;
 
-    listenfd = open_listenfd(listening_port);
-    if (listenfd < 0) {
-        fprintf(stderr, "Failed to listen on port: %s\n", argv[1]);
+    /* Build the HTTP response body */
+    bodylen = snprintf(body, MAXBUF,
+            "<!DOCTYPE html>\r\n" \
+            "<html>\r\n" \
+            "<head><title>Tiny Error</title></head>\r\n" \
+            "<body bgcolor=\"ffffff\">\r\n" \
+            "<h1>%s: %s</h1>\r\n" \
+            "<p>%s</p>\r\n" \
+            "<hr /><em>The Tiny Web server</em>\r\n" \
+            "</body></html>\r\n", \
+            errnum, shortmsg, longmsg);
+    if (bodylen >= MAXBUF) {
+        return; // Overflow!
     }
 
-    client.addrlen = sizeof(struct sockaddr_storage);
-
-    client.connfd = accept(listenfd, &client.addr, &client.addrlen);
-    if (client.connfd < 0) {
-        perror("accept");
+    /* Build the HTTP response headers */
+    buflen = snprintf(buf, MAXLINE,
+            "HTTP/1.0 %s %s\r\n" \
+            "Content-Type: text/html\r\n" \
+            "Content-Length: %zu\r\n\r\n", \
+            errnum, shortmsg, bodylen);
+    if (buflen >= MAXLINE) {
+        return; // Overflow!
     }
+
+    /* Write the headers */
+    if (rio_writen(fd, buf, buflen) < 0) {
+        fprintf(stderr, "Error writing error response headers to client\n");
+        return;
+    }
+
+    /* Write the body */
+    if (rio_writen(fd, body, bodylen) < 0) {
+        fprintf(stderr, "Error writing error response body to client\n");
+        return;
+    }
+}
+
+void *serve(void *vargp) {
+    client_info *client = (client_info *) vargp;
+    pthread_detach(pthread_self());
 
     parser_t *parser = parser_new();
 
     char buf_parser[MAXLINE];
 
     rio_t client_rio;
-    rio_readinitb(&client_rio, client.connfd);
+    rio_readinitb(&client_rio, client->connfd);
     if (rio_readlineb(&client_rio, buf_parser, MAXLINE) <= 0) {
-        /* Error with reading request */
-        return 0;
+        return NULL;
     }
 
     parser_state parse_state = parser_parse_line(parser, buf_parser);
 
     if (parse_state != REQUEST) {
         parser_free(parser);
-        /* Respond with malformed request */
+        clienterror(client->connfd, "400", "Bad Request", "Proxy received a malformed request");
         return;
     }
 
-    /* We only care about the METHOD and PATH from the request */
     const char *method, *path, *port, *host;
     parser_retrieve(parser, METHOD, &method);
     parser_retrieve(parser, PATH, &path);
@@ -107,10 +140,7 @@ int main(int argc, char **argv) {
     parser_retrieve(parser, HOST, &host);
 
     if (strncmp(method, "GET", 3)) {
-        //Not a GET request
-        if (!strncmp(method, "POST", 3)) {
-            /* 501 Not Implemented status code */
-        }
+        clienterror(client->connfd, "501", "Not Implemented", "Proxy does not implement this method");
     }
 
     if (port == NULL) {
@@ -122,7 +152,7 @@ int main(int argc, char **argv) {
         parse_state = parser_parse_line(parser, buf_parser);
         if (parse_state != HEADER) {
             /* Error with reading request*/
-            return 0;
+            return NULL;
         }
     }
 
@@ -155,6 +185,11 @@ int main(int argc, char **argv) {
     strncat(request, "\r\n", MAXLINE);
 
     int clientfd = open_clientfd(host, port); //Used to communicate with the server
+    if (clientfd < 0) {
+        clienterror(client->connfd, "503", "Service Unavailable", "Failed to connect to server");
+        parser_free(parser);
+        return NULL;
+    }
 
     rio_writen(clientfd, request, strlen(request));
 
@@ -163,6 +198,45 @@ int main(int argc, char **argv) {
     char server_response[MAXLINE];
     size_t response_size;
     while ((response_size = rio_readnb(&server_rio, server_response, MAXLINE)) > 0) {
-        rio_writen(client.connfd, server_response, response_size);
+        rio_writen(client->connfd, server_response, response_size);
+    }
+
+    close(client->connfd);
+
+    return NULL;
+}
+
+int main(int argc, char **argv) {
+    /* --- Setting up the Proxy --- */
+    sigset_t mask;
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGPIPE);
+    sigprocmask(SIG_BLOCK, &mask, NULL);
+
+    dbg_assert(argc == 2);
+
+    char *listening_port = argv[1];
+    int listenfd;
+    pthread_t tid;
+
+    listenfd = open_listenfd(listening_port);
+    if (listenfd < 0) {
+        fprintf(stderr, "Failed to listen on port: %s\n", argv[1]);
+    }
+
+    /* --- Handling Requests ---*/
+    while (true) {
+        client_info *client = Malloc(sizeof(client_info));
+
+        client->addrlen = sizeof(client->addr);
+
+        client->connfd = accept(listenfd, &client->addr, &client->addrlen);
+        if (client->connfd < 0) {
+            perror("accept");
+            continue;
+        }
+        /* Serve an individual client */
+        pthread_create(&tid, NULL, serve, client);
     }
 }

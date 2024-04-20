@@ -248,8 +248,7 @@ void serve_dynamic(int fd, char *filename, char *cgiargs) {
 /*
  * clienterror - returns an error message to the client
  */
-void clienterror(int fd, const char *errnum, const char *shortmsg,
-                 const char *longmsg) {
+void clienterror(int fd, const char *errnum, const char *shortmsg, const char *longmsg) {
     char buf[MAXLINE];
     char body[MAXBUF];
     size_t buflen;
