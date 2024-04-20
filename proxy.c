@@ -1,11 +1,13 @@
 /*
- * This program implements a proxy server that can handle GET requests and headers of all type.
- * It serves clients concurrently uses no control flow, using the serve function.
+ * This program implements a proxy server that can handle GET requests and
+ * headers of all type. It serves clients concurrently uses no control flow,
+ * using the serve function.
  *
- * To set up a connection with the client and the server, the wrapper functions open_clientfd and open_listenfd
- * are used
+ * To set up a connection with the client and the server, the wrapper functions
+ * open_clientfd and open_listenfd are used
  *
- * The only signal we block in this program is SIGPIPE. This is to prevent unexpected crashes and maintain stability.
+ * The only signal we block in this program is SIGPIPE. This is to prevent
+ * unexpected crashes and maintain stability.
  */
 
 /* Some useful includes to help you get started */
@@ -61,24 +63,26 @@ static const char *header_user_agent = "Mozilla/5.0"
 
 /* The struct used to store information about the client */
 typedef struct {
-    struct sockaddr_storage addr;    // Socket address
-    socklen_t addrlen;          // Socket address length
-    int connfd;                 // Client connection file descriptor
-    char host[MAXLINE];         // Client host
-    char port[MAXLINE];         // Client port
+    struct sockaddr_storage addr; // Socket address
+    socklen_t addrlen;            // Socket address length
+    int connfd;                   // Client connection file descriptor
+    char host[MAXLINE];           // Client host
+    char port[MAXLINE];           // Client port
 } client_info;
 
-
 /*
- * @brief Used to send error messages back to the client, when any sort of error during the process
- * of serving the client has occured. Makes and sends simple HTML.
+ * @brief Used to send error messages back to the client, when any sort of error
+ * during the process of serving the client has occured. Makes and sends simple
+ * HTML.
  *
- * param[in] fd: The client file descriptor that the error message needs to be sent to
- * param[in] errnum: The error number as a string (eg. 404)
- * param[in] shortmsg: The short error message to be deliverd
- * param[in] longmsg: The long error message to be delivered. Often a more detailed explanation of the error or why it occured
+ * param[in] fd: The client file descriptor that the error message needs to be
+ * sent to param[in] errnum: The error number as a string (eg. 404) param[in]
+ * shortmsg: The short error message to be deliverd param[in] longmsg: The long
+ * error message to be delivered. Often a more detailed explanation of the error
+ * or why it occured
  */
-void clienterror(int fd, const char *errnum, const char *shortmsg, const char *longmsg) {
+void clienterror(int fd, const char *errnum, const char *shortmsg,
+                 const char *longmsg) {
     char buf[MAXLINE];
     char body[MAXBUF];
     size_t buflen;
@@ -86,25 +90,25 @@ void clienterror(int fd, const char *errnum, const char *shortmsg, const char *l
 
     /* Build the HTTP response body */
     bodylen = snprintf(body, MAXBUF,
-            "<!DOCTYPE html>\r\n" \
-            "<html>\r\n" \
-            "<head><title>Tiny Error</title></head>\r\n" \
-            "<body bgcolor=\"ffffff\">\r\n" \
-            "<h1>%s: %s</h1>\r\n" \
-            "<p>%s</p>\r\n" \
-            "<hr /><em>The Tiny Web server</em>\r\n" \
-            "</body></html>\r\n", \
-            errnum, shortmsg, longmsg);
+                       "<!DOCTYPE html>\r\n"
+                       "<html>\r\n"
+                       "<head><title>Tiny Error</title></head>\r\n"
+                       "<body bgcolor=\"ffffff\">\r\n"
+                       "<h1>%s: %s</h1>\r\n"
+                       "<p>%s</p>\r\n"
+                       "<hr /><em>The Tiny Web server</em>\r\n"
+                       "</body></html>\r\n",
+                       errnum, shortmsg, longmsg);
     if (bodylen >= MAXBUF) {
         return; // Overflow!
     }
 
     /* Build the HTTP response headers */
     buflen = snprintf(buf, MAXLINE,
-            "HTTP/1.0 %s %s\r\n" \
-            "Content-Type: text/html\r\n" \
-            "Content-Length: %zu\r\n\r\n", \
-            errnum, shortmsg, bodylen);
+                      "HTTP/1.0 %s %s\r\n"
+                      "Content-Type: text/html\r\n"
+                      "Content-Length: %zu\r\n\r\n",
+                      errnum, shortmsg, bodylen);
     if (buflen >= MAXLINE) {
         return; // Overflow!
     }
@@ -123,15 +127,17 @@ void clienterror(int fd, const char *errnum, const char *shortmsg, const char *l
 }
 
 /*
- * @brief The function ran by newly created threads that serves clients by forwarding
- * the request and returning the response
+ * @brief The function ran by newly created threads that serves clients by
+ * forwarding the request and returning the response
  *
- * param[in] vargp: a pointer to a client_info struct, containing the details of the client to be served
- * return: NULL (required as the function that intialised threads call)
+ * param[in] vargp: a pointer to a client_info struct, containing the details of
+ * the client to be served return: NULL (required as the function that
+ * intialised threads call)
  */
 void *serve(void *vargp) {
-    client_info *client = (client_info *) vargp;
-    pthread_detach(pthread_self()); //Detach the thread so it is reaped without the need to use pthread_join
+    client_info *client = (client_info *)vargp;
+    pthread_detach(pthread_self()); // Detach the thread so it is reaped without
+                                    // the need to use pthread_join
 
     /* --- Reading the request --- */
     parser_t *parser = parser_new();
@@ -150,7 +156,8 @@ void *serve(void *vargp) {
     if (parse_state != REQUEST) {
         /* Malformed request */
         parser_free(parser);
-        clienterror(client->connfd, "400", "Bad Request", "Proxy received a malformed request");
+        clienterror(client->connfd, "400", "Bad Request",
+                    "Proxy received a malformed request");
         return NULL;
     }
 
@@ -161,11 +168,13 @@ void *serve(void *vargp) {
     parser_retrieve(parser, HOST, &host);
 
     if (strncmp(method, "GET", 3)) {
-        /* All requests that aren't of type GET to the server aren't implemented by the proxy */
-        clienterror(client->connfd, "501", "Not Implemented", "Proxy does not implement this method");
+        /* All requests that aren't of type GET to the server aren't implemented
+         * by the proxy */
+        clienterror(client->connfd, "501", "Not Implemented",
+                    "Proxy does not implement this method");
     }
 
-    if (port == NULL) { //If no port is specified, use the default of 80
+    if (port == NULL) { // If no port is specified, use the default of 80
         port = "80";
     }
 
@@ -176,7 +185,8 @@ void *serve(void *vargp) {
         if (parse_state != HEADER) {
             /* Malformed request */
             parser_free(parser);
-            clienterror(client->connfd, "400", "Bad Request", "Proxy received a malformed request");
+            clienterror(client->connfd, "400", "Bad Request",
+                        "Proxy received a malformed request");
             return NULL;
         }
     }
@@ -187,7 +197,8 @@ void *serve(void *vargp) {
     header_t *curHeader = parser_retrieve_next_header(parser);
     size_t headers_parsed;
 
-    //Append all the headers sent by the client EXCEPT for User-agent data, which is now specific to the proxy
+    // Append all the headers sent by the client EXCEPT for User-agent data,
+    // which is now specific to the proxy
     while (curHeader != NULL) {
         char *header_name = curHeader->name;
         if (strncmp("User-agent", header_name, 10)) {
@@ -206,20 +217,23 @@ void *serve(void *vargp) {
     if (headers_parsed < 1) {
         /* Needs at least one header, Malformed request */
         parser_free(parser);
-        clienterror(client->connfd, "400", "Bad Request", "Proxy received a malformed request");
+        clienterror(client->connfd, "400", "Bad Request",
+                    "Proxy received a malformed request");
         return NULL;
     }
 
-    //Appending on the User-Agent data specific to the proxy
+    // Appending on the User-Agent data specific to the proxy
     strncat(request, "User-Agent: ", MAXLINE);
     strncat(request, header_user_agent, MAXLINE);
     strncat(request, "\r\n", MAXLINE);
     strncat(request, "\r\n", MAXLINE);
 
     /* --- Forwarding the request to the server --- */
-    int clientfd = open_clientfd(host, port); //Used to communicate with the server
+    int clientfd =
+        open_clientfd(host, port); // Used to communicate with the server
     if (clientfd < 0) {
-        clienterror(client->connfd, "503", "Service Unavailable", "Failed to connect to server");
+        clienterror(client->connfd, "503", "Service Unavailable",
+                    "Failed to connect to server");
         parser_free(parser);
         return NULL;
     }
@@ -237,11 +251,14 @@ void *serve(void *vargp) {
 
     char server_response[MAXLINE];
     size_t response_size;
-    while ((response_size = rio_readnb(&server_rio, server_response, MAXLINE)) > 0) {
+    while ((response_size = rio_readnb(&server_rio, server_response, MAXLINE)) >
+           0) {
         rio_writen(client->connfd, server_response, response_size);
     }
 
     close(client->connfd);
+    Free(vargp);
+    parser_free(parser);
     return NULL;
 }
 /*
